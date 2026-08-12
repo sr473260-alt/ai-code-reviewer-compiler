@@ -42,24 +42,18 @@ export const compileCpp = async (code, input = "") => {
   );
 
   const sourceFile = path.join(tempDir, "main.cpp");
-  const executableFile = path.join(
-    tempDir,
-    process.platform === "win32" ? "main.exe" : "main"
-  );
+
+  // Linux uses "main", Windows uses "main.exe"
+  const executableFile =
+    process.platform === "win32"
+      ? path.join(tempDir, "main.exe")
+      : path.join(tempDir, "main");
 
   try {
-    // Save C++ source code
+    // Save C++ code
     await fs.writeFile(sourceFile, code, "utf8");
 
-    /*
-     * Compile
-     *
-     * Windows:
-     * g++ main.cpp -o main.exe
-     *
-     * Linux:
-     * g++ main.cpp -o main
-     */
+    // Compile
     const compileResult = await runCommand(
       "g++",
       [
@@ -74,7 +68,7 @@ export const compileCpp = async (code, input = "") => {
       }
     );
 
-    // Compilation failed
+    // Compilation error
     if (!compileResult.success) {
       return {
         success: false,
@@ -83,11 +77,14 @@ export const compileCpp = async (code, input = "") => {
       };
     }
 
-    /*
-     * Execute compiled program
-     */
+    // Execute
+    const executeCommand =
+      process.platform === "win32"
+        ? executableFile
+        : executableFile;
+
     const executeResult = await runCommand(
-      executableFile,
+      executeCommand,
       [],
       {
         cwd: tempDir,
@@ -95,6 +92,7 @@ export const compileCpp = async (code, input = "") => {
       }
     );
 
+    // Runtime error
     if (!executeResult.success) {
       return {
         success: false,
@@ -119,17 +117,14 @@ export const compileCpp = async (code, input = "") => {
     };
 
   } finally {
-    // Delete temporary files
+    // Remove temporary files
     try {
       await fs.rm(tempDir, {
         recursive: true,
         force: true,
       });
-    } catch (cleanupError) {
-      console.error(
-        "Cleanup Error:",
-        cleanupError.message
-      );
+    } catch (error) {
+      console.error("Cleanup Error:", error.message);
     }
   }
 };
