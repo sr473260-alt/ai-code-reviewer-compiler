@@ -1,121 +1,60 @@
-import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import crypto from "crypto";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
-const runCommand = (command, args, options = {}) => {
-  return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      {
-        ...options,
-        timeout: 5000,
-        maxBuffer: 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          resolve({
-            success: false,
-            stdout: stdout || "",
-            stderr: stderr || error.message,
-          });
-          return;
-        }
-
-        resolve({
-          success: true,
-          stdout: stdout || "",
-          stderr: stderr || "",
-        });
-      }
-    );
-  });
-};
+const execFileAsync = promisify(execFile);
 
 export const compileCpp = async (code, input = "") => {
-  const id = crypto.randomUUID();
-
-  const tempDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), `cpp-${id}-`)
-  );
-
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cpp-"));
   const sourceFile = path.join(tempDir, "main.cpp");
-
-  // Linux uses "main", Windows uses "main.exe"
-  const executableFile =
-    process.platform === "win32"
-      ? path.join(tempDir, "main.exe")
-      : path.join(tempDir, "main");
+  const executableFile = path.join(tempDir, "main");
 
   try {
-    // Save C++ code
+    // Write C++ source code
     await fs.writeFile(sourceFile, code, "utf8");
 
     // Compile
-    const compileResult = await runCommand(
-      "g++",
-      [
+    try {
+      await execFileAsync("g++", [
         sourceFile,
-        "-std=c++17",
-        "-O2",
         "-o",
         executableFile,
-      ],
-      {
-        cwd: tempDir,
-      }
-    );
-
-    // Compilation error
-    if (!compileResult.success) {
+        "-std=c++17",
+      ]);
+    } catch (error) {
       return {
         success: false,
         output: "",
-        runtimeError: compileResult.stderr,
+        runtimeError: error.stderr || error.message,
       };
     }
 
-    // Execute
-    const executeCommand =
-      process.platform === "win32"
-        ? executableFile
-        : executableFile;
+    // Run executable
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        executableFile,
+        [],
+        {
+          input,
+          timeout: 5000,
+          maxBuffer: 1024 * 1024,
+        }
+      );
 
-    const executeResult = await runCommand(
-      executeCommand,
-      [],
-      {
-        cwd: tempDir,
-        input,
-      }
-    );
-
-    // Runtime error
-    if (!executeResult.success) {
+      return {
+        success: true,
+        output: stdout,
+        runtimeError: stderr || "",
+      };
+    } catch (error) {
       return {
         success: false,
-        output: executeResult.stdout,
-        runtimeError: executeResult.stderr,
+        output: error.stdout || "",
+        runtimeError: error.stderr || error.message,
       };
     }
-
-    return {
-      success: true,
-      output: executeResult.stdout,
-      runtimeError: executeResult.stderr,
-    };
-
-  } catch (error) {
-    console.error("Compiler Error:", error);
-
-    return {
-      success: false,
-      output: "",
-      runtimeError: error.message,
-    };
-
   } finally {
     // Remove temporary files
     try {
@@ -123,8 +62,8 @@ export const compileCpp = async (code, input = "") => {
         recursive: true,
         force: true,
       });
-    } catch (error) {
-      console.error("Cleanup Error:", error.message);
+    } catch (cleanupError) {
+      console.error("Cleanup error:", cleanupError.message);
     }
   }
 };
